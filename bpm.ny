@@ -1,0 +1,66 @@
+(setq filename "test-data/Bazzini-piano.wav")
+
+(setq file-sound (aref  (s-read filename) 0))
+
+(defun arange (from to &key (step 1))
+  (let ((res nil))
+    (dotimes (i (truncate (/ (- to from) step)) (reverse res))
+      (push (+ from (* step i)) res))))
+
+(defun try-bpm (snd bpm)
+  (let* ((sr (snd-srate snd))
+         (time-step (/ 60.0 bpm))
+         (l (snd-length snd 1000000000))
+         (scale (/ 1.0 (/ l sr time-step)))
+         (init (snd-xform snd sr 0 0 time-step scale)))
+    (dolist (offset
+              (arange time-step (/ l sr) :step time-step)
+             `(,(peak init l) ,init))
+      (setq init (sum init (snd-xform snd sr 0 offset (+ offset time-step) scale))))))
+
+(defun try-bpm-range (snd bpm-range)
+  (sort (mapcar (lambda (bpm) (append `(,bpm) (try-bpm snd bpm))) bpm-range)
+        (lambda (x y) (> (cadr x) (cadr y)))))
+
+(defun nth-sample (snd n)
+  (sref snd (+ (/ n (snd-srate snd)) (snd-t0 snd))))
+
+(defun float-comp (f1 f2 &key (scale 100000000))
+  (= (truncate (* f1 scale))
+     (truncate (* f2 scale))))
+
+(defun find-peak-offset (snd peak)
+  (dotimes (i (snd-length snd 100000000))
+    (when (float-comp peak (abs (nth-sample snd i)))
+      (return (cons i (nth-sample snd i))))))
+
+(setq test-data '(("test-data/bsaber/32e (Harder Better Faster Stronger - runrockgame)/song.wav" . 123.5)
+                  ("test-data/bsaber/3fc (Seven Nation Army - blueasis)/song.wav" . 124)
+                  ("test-data/bsaber/141 (Gangnam Style - greatyazer)/song.wav" . 132)
+                  ("test-data/bsaber/217 (Beat it - freeek)/song.wav" . 138.8000030517578)
+                  ("test-data/bsaber/7 (Unravel - winepic)/song.wav" . 135)
+                  ("test-data/bsaber/29 (Super Mario Bros. Theme (Overworld Theme) - redknight)/song.wav" . 125)
+                  ("test-data/bsaber/1bf (Lone Digger - calijor)/song.wav" . 124)
+                  ("test-data/bsaber/bd (Livin' On A Prayer - jnua12345)/song.wav" . 122)
+                  ("test-data/bsaber/believer-125bpm/song.wav" . 125)
+                  ("test-data/bsaber/225 (Clint Eastwood - freeek)/song.wav" . 84)
+                  ("test-data/bsaber/b (Believer - rustic)/song.wav" . 125)))
+
+(defun get-target-sample-rate (sr)
+  (cond
+    ((= 0 (rem (truncate sr) 11025)) 441.0)
+    ((= 0 (rem (truncate sr) 12000)) 480.0)
+    (t sr)))
+      
+(dolist (s test-data)
+  (let* ((bpm-low 100)
+         (bpm-high 200)
+         (track (s-read (car s)))
+         (src-sound (sum (aref track 0) (aref track 1)))
+         (sr (get-target-sample-rate (snd-srate src-sound)))
+         (sound (rms src-sound sr 100))
+         (found-bpm (car (try-bpm-range sound (arange bpm-low bpm-high))))
+         (second-iter (first (car (try-bpm-range sound (arange (- (car found-bpm) 0.6)
+                                                               (+ (car found-bpm) 0.6)
+                                                               :step 0.1))))))
+    (print `(,(car s) ,(cdr s) ,second-iter))))
